@@ -1,6 +1,6 @@
 # DollarCloud: Architectural Decisions
 
-*Decision log — updated through Phase 1 completion*
+*Decision log — updated through Phase 2 (Drive scope revision)*
 
 ---
 
@@ -30,7 +30,15 @@ Build **DollarCloud**, a web-based, mobile-aware double-entry accounting applica
 
 **Conflict handling:** Optimistic locking will be used. If a user attempts to save and a newer version of the file exists on Drive, they will be warned and asked to reconcile. This is sufficient for the household and small-business use case.
 
-**OAuth scope:** Drive access will be scoped to `drive.appdata` or a specific folder only. Full Drive access will not be requested.
+**OAuth scope:** Drive access uses the `drive.file` scope. Full Drive access is not requested.
+
+`drive.file` limits the app to files it created or files the user explicitly opens through a Google Drive picker. It does not grant access to the rest of the user's Drive.
+
+`drive.appdata` was considered and rejected. That scope stores the file in a hidden application folder the user cannot see or navigate to in the Drive UI. It cannot be easily copied, moved, or deleted without going through the app or a buried Drive settings page. That behavior directly contradicts the project's stated goal of giving users genuine ownership and control over their own data.
+
+With `drive.file`, the user chooses a folder during first-run setup. The app creates `dollarcloud.db` in that folder. The file is fully visible in the user's Drive: they can see it, copy it, back it up, move it, or delete it at any time without any involvement from the app.
+
+**Known edge case:** If the user moves or renames the file outside the app, the app will lose track of it. Recovery requires re-running the folder picker to re-link the file. This is a better problem to have than users being unable to access or manage their own data.
 
 **Future upgrade path:** If true concurrent multi-user access is needed later, migrating to a user-hosted Supabase (PostgreSQL) instance is the cleanest path that preserves the user-ownership philosophy.
 
