@@ -1,6 +1,6 @@
 # DollarCloud: Architectural Decisions
 
-*Decision log — updated through Phase 2 (Drive scope revision)*
+*Decision log — updated through Phase 2 completion*
 
 ---
 
@@ -96,7 +96,7 @@ The schema is modeled on the logical structure of double-entry bookkeeping, stri
 
 1. **Bare FastAPI scaffold** ✅ — A minimal FastAPI app running on Render.com with a single test endpoint and no authentication. Validates the hosting setup and project structure. GitHub repository established at `StephenMNolan/gnucash-web` with automatic deploys to Render on every push.
 
-2. **Google OAuth plus Drive file I/O** — Complete the OAuth flow end to end, then prove that the app can read and write a file on the user's Google Drive. This is the highest-risk unknown in the project and must be resolved before the schema is finalized. No local username/password system will be built; Google OAuth is the foundation from the start.
+2. **Google OAuth plus Drive file I/O** ✅ — Google OAuth login flow is working end to end on both localhost and Render.com. The app can create a file on the user's Google Drive and read it back by file ID. Sessions are managed via signed cookies using Starlette's `SessionMiddleware`, keeping the backend stateless. Authlib is used for the OAuth flow. The Drive API is accessed via `google-api-python-client`.
 
 3. **Schema design** — Finalize the database schema on paper first, stress-testing it against real scenarios (multi-split transactions, reconciliation states, opening balances) before writing any DDL.
 
@@ -112,6 +112,37 @@ The schema is modeled on the logical structure of double-entry bookkeeping, stri
 
 **Note on authentication:** A local username/password system was considered for an early phase but rejected. It would create code that does not survive into production. An unauthenticated stub in phase 1 followed by Google OAuth in phase 2 is the more direct path.
 
+**Each phase is developed and validated in its own chat session** before the next begins. The architecture decisions document is updated at the close of each phase and carried forward as context.
+
+---
+
+## Decision 8: OAuth Library and Session Management
+
+**Decision:** Authlib handles the OAuth 2.0 flow. Starlette's `SessionMiddleware` with `itsdangerous` handles signed cookie sessions.
+
+**Rationale:** Authlib integrates cleanly with FastAPI and Starlette, handles the redirect/callback dance and token management, and uses Google's OpenID Connect discovery document to locate endpoints automatically rather than hardcoding them. The alternative, `google-auth-oauthlib`, is lower-level and requires more manual plumbing.
+
+The breakage risk from Google API changes is the same for both libraries, since both wrap the standard OAuth 2.0 protocol rather than Google-specific internals.
+
+Signed cookies keep the backend stateless, which is consistent with the architecture philosophy and avoids any need for a server-side session store on Render's ephemeral filesystem.
+
+**Backend file structure established in Phase 2:**
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py          # App entry point, middleware, router registration
+│   ├── auth.py          # OAuth flow endpoints (/auth/login, /auth/callback, /auth/me, /auth/logout)
+│   ├── drive.py         # Google Drive API wrapper (proof of concept; will be replaced in Phase 4)
+│   └── dependencies.py  # FastAPI dependencies: get_current_user, get_current_token
+├── requirements.txt
+├── .env.example
+└── .env                 # Gitignored; contains GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SECRET_KEY, REDIRECT_URI
+```
+
+**Known gap:** The Drive proof-of-concept endpoints (`/drive/test-write`, `/drive/test-read`) create files in the Drive root with no duplicate checking. These will be removed and replaced with proper first-run setup logic in Phase 4, including a folder picker so the user controls where `dollarcloud.db` is stored.
+
 ---
 
 ## Deferred Decisions
@@ -121,3 +152,4 @@ The schema is modeled on the logical structure of double-entry bookkeeping, stri
 - Offline / progressive web app capabilities
 - Reporting and export formats
 - Multi-currency and investment account support timeline
+- Google Drive folder picker UI for first-run setup (user chooses where `dollarcloud.db` is stored; deferred to Phase 4)

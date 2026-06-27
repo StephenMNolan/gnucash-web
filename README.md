@@ -14,9 +14,13 @@ gnucash-web/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
-│   │   └── main.py
+│   │   ├── main.py
+│   │   ├── auth.py
+│   │   ├── drive.py
+│   │   └── dependencies.py
 │   ├── requirements.txt
-│   └── .env.example
+│   ├── .env.example
+│   └── .env               # Gitignored — never committed
 ├── frontend/
 │   └── index.html
 ├── .gitignore
@@ -52,8 +56,17 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Open .env and fill in any values you need
+# Open .env and fill in your values
 ```
+
+The following variables are required:
+
+| Variable | Description |
+|---|---|
+| `GOOGLE_CLIENT_ID` | From Google Auth Platform |
+| `GOOGLE_CLIENT_SECRET` | From Google Auth Platform |
+| `SECRET_KEY` | Random hex string for signing session cookies. Generate with: `python3 -c "import secrets; print(secrets.token_hex(32))"` |
+| `REDIRECT_URI` | `http://localhost:8000/auth/callback` for local dev |
 
 ### 5. Run the development server
 
@@ -66,6 +79,8 @@ Visit http://127.0.0.1:8000 in your browser. You should see:
 ```json
 {"message": "Hello, World!"}
 ```
+
+To test the login flow, visit http://127.0.0.1:8000/auth/login. After signing in with Google you will be redirected to `/auth/me`, which returns your name and email as JSON.
 
 The interactive API browser is available at http://127.0.0.1:8000/docs.
 
@@ -140,7 +155,7 @@ git pull
 ## Development Phases
 
 - [x] Phase 1: Bare FastAPI scaffold on Render.com
-- [ ] Phase 2: Google OAuth and Drive file I/O
+- [x] Phase 2: Google OAuth and Drive file I/O
 - [ ] Phase 3: Schema design
 - [ ] Phase 4: SQLite CRUD on Drive
 - [ ] Phase 5: Entities
