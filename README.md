@@ -241,18 +241,51 @@ git pull                            # Pull latest from GitHub
 
 ---
 
+## Development Philosophy
+
+Development proceeds in small, independently testable increments. Each phase is developed and validated in its own chat session before the next begins. No phase begins until the previous one is working and deployed.
+
+**Module size discipline:** No module exceeds approximately 500 lines. Anything larger is split into focused sub-modules. This keeps the codebase navigable, makes bugs easy to isolate, and enforces clean separation of concerns.
+
+**Two-track development strategy:**
+
+The schema already contains everything needed for both an accounting view and a personal finance view. However, building both simultaneously would be needlessly complex. Instead, development proceeds in two tracks:
+
+**Track 1 — Accounting View (current focus)**
+Build a fully functional web-based double-entry accounting application: a GnuCash equivalent in the browser. This means chart of accounts management, transaction entry with debits and credits, trial balance, and basic financial statements. The accounting layer is the foundation everything else depends on, so it gets built first and proven before anything is added on top.
+
+**Track 2 — Personal Finance View (future)**
+Once Track 1 is solid, add the institution-centric personal finance layer: banks and brokerages, reconciliation against statements, payee management, and the "Driver's Seat" presentation mode. The schema and architecture already support this. No Track 1 decisions should impede Track 2, but Track 2 is not built until Track 1 is working well.
+
+---
+
 ## Development Phases
+
+### Completed
 
 - [x] Phase 1: Bare FastAPI scaffold on Render.com
 - [x] Phase 2: Google OAuth and Drive file I/O
 - [x] Phase 3: Schema design
-- [ ] Phase 4: SQLite CRUD on Drive (includes first-run setup and folder picker)
-- [ ] Phase 5: Entities and institutions module
-- [ ] Phase 6: Accounts module (chart of accounts)
-- [ ] Phase 7: Transactions and splits
-- [ ] Phase 8: Commodities
 
-**Future modules (schema hooks in place, implementation deferred):**
+### Track 1 — Accounting View
+
+- [ ] Phase 4: SQLite CRUD on Drive — database file lifecycle: first-run setup, folder picker, open/save, year-end close skeleton
+- [ ] Phase 5: Entity module — entity record management, base currency, period settings
+- [ ] Phase 6: Commodities module — currency management (securities deferred to Track 2)
+- [ ] Phase 7: Chart of accounts — account hierarchy, create/edit/deactivate, account types
+- [ ] Phase 8: Transaction entry — double-entry transaction and split management
+- [ ] Phase 9: Reports — trial balance, balance sheet, income statement
+
+### Track 2 — Personal Finance View (future, after Track 1 is proven)
+
+- [ ] Institutions module — banks, brokerages, credit unions
+- [ ] Financial accounts module — real-world account management, reconciliation
+- [ ] Payees module — merchant and counterparty management, auto-categorization
+- [ ] Reconciliation workflow — match splits to institution statements
+- [ ] Personal finance reports — net worth, spending analysis, cash flow
+
+### Deferred Modules (schema hooks in place)
+
 - Fixed income sub-ledger (CDs, Treasuries, coupon tracking)
 - Investment positions sub-ledger (shares, cost basis, lots)
 - Fixed asset tracking sub-ledger (plant, property, equipment, inventory)

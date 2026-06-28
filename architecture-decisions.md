@@ -312,6 +312,22 @@ backend/
 
 ---
 
+## Decision 16: Accounts Are Never Deleted, Only Deactivated
+
+**Decision:** Accounts are retained permanently in the database. Closing an account sets `is_active = 0` and `closing_date`. Accounts are never deleted. This is enforced at three levels: application policy, `ON DELETE RESTRICT` on the `splits.account_id` foreign key, and the `accounts_active` view which filters inactive accounts from normal UI queries.
+
+**Rationale — three independent reasons, each sufficient on its own:**
+
+**Audit trail integrity.** Every split references `account_id` by foreign key. Deleting an account would orphan its historical splits, destroying the transaction record. `ON DELETE RESTRICT` prevents this at the database level, but permanent retention is the cleaner policy: the constraint becomes a last-resort guardrail rather than the primary protection.
+
+**Cross-file GUID stability.** Account IDs are GUIDs that carry forward from one period file to the next, giving the same account a stable identity across years. If a closed account were deleted from the active file and a new account were later created that happened to receive the same GUID (probability roughly 1 in 2^128 per pair, non-zero), that new account would incorrectly match the old account's ID in any prior-year archive. Permanent retention eliminates this class of problem entirely.
+
+**Standard accounting practice.** Charts of accounts are historical records. Closed accounts represent real economic activity that occurred under those categories. Destroying them would compromise the integrity of the historical record.
+
+**Implementation:** The `accounts_active` view (`SELECT * FROM accounts WHERE is_active = 1`) handles filtering in all normal UI contexts. Reporting and audit queries can join directly against the `accounts` table to include closed accounts when needed.
+
+---
+
 ## Deferred Decisions
 
 - Specific JavaScript framework for the frontend (vanilla JS vs. Vue vs. other)
