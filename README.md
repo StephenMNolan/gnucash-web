@@ -7,12 +7,25 @@ A web-based, mobile-aware double-entry accounting application. User financial da
 
 ---
 
+## What DollarCloud Is
+
+DollarCloud combines the mathematical integrity of double-entry accounting with the practical usability of institution-centric personal finance tracking. It is designed to fix the things that make GnuCash frustrating for personal use:
+
+- **No "Imbalance" accounts.** Every transaction must balance. Unbalanced entries are rejected at the database level.
+- **Clean year-end close.** Books are closed annually (or quarterly, or monthly). The active file stays small and fast. Prior-year archives live on Google Drive and can be opened when needed.
+- **Your data is yours.** The SQLite database file lives on your Google Drive. You can see it, copy it, move it, or delete it without any involvement from the app.
+- **Proper account separation.** "Chase Checking #1234" (a financial account) and "Assets:Current Assets:Checking" (an accounting account) are different things. DollarCloud keeps them separate so that a single brokerage account can hold stocks, bonds, and cash — each categorized correctly — without the GnuCash workaround of one accounting account per institution account.
+
+---
+
 ## Project Structure
 
 ```
 gnucash-web/
 ├── backend/
 │   ├── app/
+│   │   ├── db/
+│   │   │   └── schema.sql     # Full database schema (Phase 3)
 │   │   ├── __init__.py
 │   │   ├── main.py
 │   │   ├── auth.py
@@ -23,9 +36,104 @@ gnucash-web/
 │   └── .env               # Gitignored — never committed
 ├── frontend/
 │   └── index.html
+├── architecture-decisions.md
 ├── .gitignore
 └── README.md
 ```
+
+---
+
+## Database Architecture
+
+DollarCloud uses a **dual-layer architecture** that cleanly separates "where money lives" from "how it's categorized."
+
+### The Two Layers
+
+**Financial Layer — where money lives**
+
+| Table | Purpose |
+|---|---|
+| `institutions` | Banks, brokerages, credit unions |
+| `financial_accounts` | Real-world accounts: Chase Checking #1234, Fidelity brokerage #5678 |
+
+**Accounting Layer — how it's categorized**
+
+| Table | Purpose |
+|---|---|
+| `accounts` | Chart of accounts; hierarchical double-entry categories |
+| `transactions` | Transaction header: date, payee, narrative |
+| `splits` | Double-entry legs; the bridge between the two layers |
+
+**Support Tables**
+
+| Table | Purpose |
+|---|---|
+| `entity` | Single-row file header: owner name, base currency, period dates, UI preferences |
+| `commodities` | Currencies and securities; referenced everywhere a currency or security is needed |
+| `payees` | Merchants, employers, counterparties |
+
+### How a Transaction Works
+
+```
+You pay $50 at HEB, split: $30 from Chase Checking, $20 from a prepaid Visa.
+
+Transaction header:
+  date: 2026-01-15
+  payee: HEB
+
+Split 1 (the expense):
+  accounting account: Expenses:Groceries
+  financial account:  Chase Checking #1234
+  amount: $30   debit
+
+Split 2 (Chase funding):
+  accounting account: Assets:Current Assets:Checking
+  financial account:  Chase Checking #1234
+  amount: $30   credit
+
+Split 3 (prepaid Visa funding):
+  accounting account: Assets:Prepaid Cards:Visa
+  financial account:  Prepaid Visa Card
+  amount: $20   credit
+
+Split 4 (the expense, prepaid portion):
+  accounting account: Expenses:Groceries
+  financial account:  Prepaid Visa Card
+  amount: $20   debit
+
+Total debits = $50. Total credits = $50. Balanced.
+```
+
+Every split must reference both an accounting account and a financial account. There are no exceptions. The database rejects any transaction where debits do not equal credits.
+
+### Year-End Close
+
+At the end of each period:
+
+1. Closing entries zero out income and expense accounts, rolling net income into retained earnings
+2. Opening balance entries seed the new file with asset, liability, and equity balances
+3. Active sub-ledger positions carry forward (open investments, unsold assets, un-matured fixed income instruments)
+4. The closed file is archived on Google Drive; a new file is created for the new period
+
+The `entity` table stores the Google Drive file ID of the previous archive, enabling an "open prior year" feature without requiring the app to manage a complex file inventory.
+
+### Sub-Ledger Architecture
+
+Accounts that require item-level tracking (investments, fixed income instruments, fixed assets) use a `subledger_enabled` flag. The general ledger holds the account balance; a specialized sub-ledger module maintains the detail.
+
+```
+GL:  Assets:Investments = $150,000
+SL:  100 shares AAPL @ $180  =  $18,000
+     200 shares MSFT @ $380  =  $76,000
+     ...
+```
+
+Sub-ledger modules are planned for future phases:
+- `investment` — stocks, ETFs, mutual funds; cost basis, lots, realized/unrealized gains
+- `fixed_income` — CDs, Treasuries, bonds; maturity ladder, coupon payments
+- `asset_tracking` — vehicles, real estate, equipment; depreciation, disposal
+
+The schema hooks (`subledger_enabled`, `subledger_module`) are in place now so no schema migration will be needed when these modules are built.
 
 ---
 
@@ -106,15 +214,13 @@ Render deploys automatically on every push to the `main` branch. There is no man
 
 ### Updating the app
 
-Just push to GitHub from your Mac:
-
 ```bash
 git add .
 git commit -m "Description of what you changed"
 git push
 ```
 
-Render will detect the push and redeploy automatically. No further action needed.
+Render detects the push and redeploys automatically.
 
 ### Environment variables
 
@@ -124,30 +230,13 @@ Secret values (API keys, OAuth credentials) are set in the Render dashboard unde
 
 ## Git Workflow (Quick Reference)
 
-### Check what has changed
-
 ```bash
-git status
-```
-
-### Stage your changes
-
-```bash
-git add .                          # Stage everything
-git add backend/app/main.py        # Stage a specific file
-```
-
-### Commit and push
-
-```bash
-git commit -m "A short description of what you changed"
+git status                          # Check what has changed
+git add .                           # Stage everything
+git add backend/app/main.py         # Stage a specific file
+git commit -m "Short description"
 git push
-```
-
-### Pull the latest from GitHub
-
-```bash
-git pull
+git pull                            # Pull latest from GitHub
 ```
 
 ---
@@ -156,9 +245,16 @@ git pull
 
 - [x] Phase 1: Bare FastAPI scaffold on Render.com
 - [x] Phase 2: Google OAuth and Drive file I/O
-- [ ] Phase 3: Schema design
-- [ ] Phase 4: SQLite CRUD on Drive
-- [ ] Phase 5: Entities
-- [ ] Phase 6: Accounts
+- [x] Phase 3: Schema design
+- [ ] Phase 4: SQLite CRUD on Drive (includes first-run setup and folder picker)
+- [ ] Phase 5: Entities and institutions module
+- [ ] Phase 6: Accounts module (chart of accounts)
 - [ ] Phase 7: Transactions and splits
 - [ ] Phase 8: Commodities
+
+**Future modules (schema hooks in place, implementation deferred):**
+- Fixed income sub-ledger (CDs, Treasuries, coupon tracking)
+- Investment positions sub-ledger (shares, cost basis, lots)
+- Fixed asset tracking sub-ledger (plant, property, equipment, inventory)
+- Historical prices table
+- GnuCash import/export utility
