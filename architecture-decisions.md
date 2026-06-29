@@ -1,6 +1,6 @@
 # DollarCloud: Architectural Decisions
 
-*Decision log — updated through Phase 3 completion*
+*Decision log — updated through Phase 4 completion*
 
 ---
 
@@ -265,7 +265,7 @@ Placing it on splits means each leg of the transaction independently records whi
 
 3. **Schema design** ✅ — Full nine-table schema designed, stress-tested against real scenarios (multi-payment transactions, reconciliation, year-end close, sub-ledger extensibility), and documented before any DDL was written.
 
-4. **SQLite CRUD on Drive** — Implement create, read, update, and delete operations against the real schema, with the SQLite file stored on Google Drive. Includes first-run setup flow with folder picker.
+4. **SQLite CRUD on Drive** ✅ — Database file lifecycle implemented: first-run setup flow, existing file detection, Drive file ID stored in session cookie, `open_database` context manager for read/write access. Proof-of-concept Drive endpoints removed.
 
 5. **Entities** — Add maintenance tools for the entity record and institutions.
 
@@ -289,24 +289,25 @@ Placing it on splits means each leg of the transaction independently records whi
 
 Signed cookies keep the backend stateless, which is consistent with the architecture philosophy and avoids any need for a server-side session store on Render's ephemeral filesystem.
 
-**Backend file structure established in Phase 2:**
+**Backend file structure established in Phase 2, expanded in Phase 4:**
 
 ```
 backend/
 ├── app/
 │   ├── db/
-│   │   └── schema.sql   # Full database schema; used during first-run file creation
+│   │   ├── __init__.py      # Makes app/db a proper Python package
+│   │   ├── schema.sql       # Full database schema; applied during first-run setup
+│   │   ├── database.py      # SQLite lifecycle: download, apply schema, upload (Phase 4)
+│   │   └── setup.py         # First-run setup flow and endpoints (Phase 4)
 │   ├── __init__.py
-│   ├── main.py          # App entry point, middleware, router registration
-│   ├── auth.py          # OAuth flow endpoints (/auth/login, /auth/callback, /auth/me, /auth/logout)
-│   ├── drive.py         # Google Drive API wrapper (proof of concept; will be replaced in Phase 4)
-│   └── dependencies.py  # FastAPI dependencies: get_current_user, get_current_token
+│   ├── main.py              # App entry point, middleware, router registration
+│   ├── auth.py              # OAuth flow endpoints (/auth/login, /auth/callback, /auth/me, /auth/logout)
+│   ├── drive.py             # Google Drive API wrapper (create, download, update, metadata)
+│   └── dependencies.py      # FastAPI dependencies: get_current_user, get_current_token
 ├── requirements.txt
 ├── .env.example
-└── .env                 # Gitignored; contains GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SECRET_KEY, REDIRECT_URI
+└── .env                     # Gitignored; contains GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SECRET_KEY, REDIRECT_URI
 ```
-
-**Known gap:** The Drive proof-of-concept endpoints (`/drive/test-write`, `/drive/test-read`) create files in the Drive root with no duplicate checking. These will be removed and replaced with proper first-run setup logic in Phase 4, including a folder picker so the user controls where `dollarcloud.db` is stored.
 
 **Key lesson from Phase 2:** `oauth.register()` must not run at module import time. It executed before `load_dotenv()`, causing a `KeyError` on `GOOGLE_CLIENT_ID`. Resolved by wrapping in `init_oauth()` called explicitly after env vars load.
 
@@ -328,6 +329,71 @@ backend/
 
 ---
 
+## Decision 17: Session Cookie Stores Drive File ID
+
+**Decision:** The Google Drive file ID of the user's `dollarcloud.db` is stored in the signed session cookie under the key `db_file_id`, alongside the existing `user` and `token` keys.
+
+**Rationale:** The backend is stateless and has no server-side store. Three alternatives were considered:
+
+- **Server-side record on Render** — rejected. Render's free tier uses an ephemeral filesystem. Any file written there is lost on the next deploy or instance restart.
+- **Config file on the user's Drive** — viable but adds a second Drive API call on every session start, and requires handling a second file's lifecycle.
+- **Signed session cookie** — the simplest option consistent with the stateless architecture already in place. The cookie is `HttpOnly`, `SameSite=lax`, and HTTPS-enforced on Render, which is sufficient protection for a file ID (not a secret in itself).
+
+**Tradeoff accepted:** If the user clears their cookies or switches browsers, they will need to re-run the folder picker. This is a minor inconvenience. Cookie clearing is rare in modern browsers, and re-running the picker is a two-click operation.
+
+**Session keys after Phase 4:**
+
+| Key | Contents | Set by |
+|---|---|---|
+| `user` | `{ email, name }` | `/auth/callback` |
+| `token` | Full OAuth token dict including `access_token` | `/auth/callback` |
+| `db_file_id` | Drive file ID of `dollarcloud.db` | `/setup/init` or `/setup/link` |
+
+---
+
+## Decision 18: First-Run Setup Flow and Existing File Detection
+
+**Decision:** First-run setup is a two-step backend flow. The frontend provides the folder ID (via the Google Drive Picker widget). The backend searches the folder for an existing `dollarcloud.db` before creating a new one.
+
+**Setup endpoints:**
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /setup/status` | Returns `{ "ready": true/false }`. Checks session for `db_file_id` and verifies the file is still accessible on Drive. Clears stale file IDs from the session if the file has been deleted. |
+| `GET /setup/token` | Returns the OAuth `access_token` for the Drive Picker widget to use. |
+| `POST /setup/init` | Accepts a `folder_id`. Searches the folder for `dollarcloud.db`. Creates a new database if none is found (status: `"created"`). Returns the existing file for confirmation if one is found (status: `"existing_found"`). |
+| `POST /setup/link` | Accepts a `file_id`. Validates the file is a real DollarCloud database, then stores it in the session. Used to confirm an existing file found by `/setup/init`, or as a manual recovery path when the user knows their file ID. |
+
+**Two-step confirmation for existing files:** When `/setup/init` finds an existing `dollarcloud.db`, it validates the file but does not store it in the session. It returns `existing_found` and the file ID to the frontend, which asks the user to confirm before calling `/setup/link`. This prevents silently overwriting or hijacking a file the user did not intend to open.
+
+**Validation:** Both `/setup/init` (on existing file detection) and `/setup/link` download the candidate file and check that all required tables are present. A file named `dollarcloud.db` that is not a real DollarCloud database (e.g. a SQLite file from another application) is rejected with a 409, and the user is directed to choose a different folder.
+
+**Drive Picker note:** The Google Drive Picker is a JavaScript widget that runs entirely in the browser. It returns a folder ID when the user selects a destination. The frontend passes this folder ID to `/setup/init`. The Picker requires an OAuth `access_token` to initialize, which it obtains from `GET /setup/token`.
+
+---
+
+## Decision 19: Module Size Cap — 500 Lines
+
+**Decision:** No Python module in the backend exceeds approximately 500 lines. When a module approaches this limit, it is split into focused sub-modules with clear, non-overlapping responsibilities.
+
+**Rationale:** Modules that grow beyond 500 lines are usually doing too many things. Keeping modules small enforces separation of concerns, makes individual files easy to read in a single sitting, and makes bugs easier to isolate. The 500-line limit is a guideline, not a hard rule enforced by tooling, but it is treated as a strong signal that a refactor is needed.
+
+**Current module sizes (Phase 4):**
+
+| Module | Approximate lines |
+|---|---|
+| `app/main.py` | ~45 |
+| `app/auth.py` | ~45 |
+| `app/drive.py` | ~130 |
+| `app/dependencies.py` | ~15 |
+| `app/db/__init__.py` | ~1 |
+| `app/db/database.py` | ~200 |
+| `app/db/setup.py` | ~260 |
+
+All modules are well within the limit at the close of Phase 4.
+
+---
+
 ## Deferred Decisions
 
 - Specific JavaScript framework for the frontend (vanilla JS vs. Vue vs. other)
@@ -335,8 +401,9 @@ backend/
 - Offline / progressive web app capabilities
 - Reporting and export formats
 - GnuCash import/export utility (separate tool, not a core dependency)
-- Google Drive folder picker UI for first-run setup (deferred to Phase 4)
+- Google Drive folder picker UI for first-run setup (frontend implementation, deferred to Phase 5)
 - `prices` table for historical commodity price data (schema unblocked, implementation later)
 - Fixed income sub-ledger module (schema hook in place via `subledger_module = 'fixed_income'`)
 - Investment positions sub-ledger (schema hook in place via `subledger_module = 'investment'`)
 - Fixed asset tracking sub-ledger (schema hook in place via `subledger_module = 'asset_tracking'`)
+- OAuth token refresh handling (access tokens expire after one hour; acceptable for Phase 4 short sessions)

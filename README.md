@@ -25,12 +25,15 @@ gnucash-web/
 ├── backend/
 │   ├── app/
 │   │   ├── db/
-│   │   │   └── schema.sql     # Full database schema (Phase 3)
+│   │   │   ├── __init__.py    # Makes app/db a Python package
+│   │   │   ├── schema.sql     # Full database schema
+│   │   │   ├── database.py    # SQLite lifecycle: download, schema, upload
+│   │   │   └── setup.py       # First-run setup flow and endpoints
 │   │   ├── __init__.py
-│   │   ├── main.py
-│   │   ├── auth.py
-│   │   ├── drive.py
-│   │   └── dependencies.py
+│   │   ├── main.py            # App entry point, middleware, routers
+│   │   ├── auth.py            # OAuth flow endpoints
+│   │   ├── drive.py           # Google Drive API wrapper
+│   │   └── dependencies.py    # FastAPI dependencies
 │   ├── requirements.txt
 │   ├── .env.example
 │   └── .env               # Gitignored — never committed
@@ -182,15 +185,15 @@ The following variables are required:
 uvicorn app.main:app --reload
 ```
 
-Visit http://127.0.0.1:8000 in your browser. You should see:
+Visit http://localhost:8000 in your browser. You should see:
 
 ```json
 {"message": "Hello, World!"}
 ```
 
-To test the login flow, visit http://127.0.0.1:8000/auth/login. After signing in with Google you will be redirected to `/auth/me`, which returns your name and email as JSON.
+To test the login flow, visit http://localhost:8000/auth/login in your browser (not via the Swagger UI — OAuth redirects require full browser navigation). After signing in with Google you will be redirected to `/auth/me`, which returns your name and email as JSON.
 
-The interactive API browser is available at http://127.0.0.1:8000/docs.
+The interactive API browser is available at http://localhost:8000/docs. Open this in the same browser after completing the login flow so the session cookie carries over.
 
 The `--reload` flag restarts the server automatically whenever you save a file. Remove it in production.
 
@@ -266,10 +269,10 @@ Once Track 1 is solid, add the institution-centric personal finance layer: banks
 - [x] Phase 1: Bare FastAPI scaffold on Render.com
 - [x] Phase 2: Google OAuth and Drive file I/O
 - [x] Phase 3: Schema design
+- [x] Phase 4: SQLite CRUD on Drive — database lifecycle, first-run setup flow, existing file detection, session-stored file ID
 
 ### Track 1 — Accounting View
 
-- [ ] Phase 4: SQLite CRUD on Drive — database file lifecycle: first-run setup, folder picker, open/save, year-end close skeleton
 - [ ] Phase 5: Entity module — entity record management, base currency, period settings
 - [ ] Phase 6: Commodities module — currency management (securities deferred to Track 2)
 - [ ] Phase 7: Chart of accounts — account hierarchy, create/edit/deactivate, account types
