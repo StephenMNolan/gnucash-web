@@ -1,6 +1,6 @@
 # DollarCloud: Architectural Decisions
 
-*Decision log — updated through Phase 4 completion*
+*Decision log — updated through Phase 4 completion (addendum)*
 
 ---
 
@@ -391,6 +391,49 @@ backend/
 | `app/db/setup.py` | ~260 |
 
 All modules are well within the limit at the close of Phase 4.
+
+---
+
+## Decision 20: Terminology — Accounts vs Financial Accounts
+
+**Decision:** Throughout the codebase and documentation, the two types of account-like entities are referred to exclusively by their schema table names to avoid ambiguity.
+
+- **`accounts`** refers to chart of accounts entries: Assets, Liabilities, Equity, Income, Expenses, and all their children. These are the accounting-layer categories used for double-entry bookkeeping.
+- **`financial_accounts`** refers to real-world accounts held at institutions: Frost Bank Checking, Fidelity Brokerage, etc. These are the PFM-layer items managed in Track 2.
+
+The word "account" alone is never used without qualification in contexts where the distinction matters. This applies in code comments, docstrings, API documentation, and developer conversation.
+
+**Rationale:** The two concepts are fundamentally different and easily confused. "Account" in everyday language maps most naturally to a financial account (a bank account), but in accounting software it more commonly means a chart of accounts entry. Using the schema names eliminates guesswork.
+
+---
+
+## Decision 21: Track 1 Bridge — Default Institution and Financial Account
+
+**Decision:** To allow Track 1 (accounting view) development to proceed without implementing Track 2 (PFM view) features, a placeholder institution and financial account are seeded automatically during first-run database creation. All Track 1 splits reference the default financial account to satisfy the `NOT NULL` constraint on `splits.financial_account_id`.
+
+**Seeded records:**
+- Institution: "Default Financial Institution"
+- Financial account: "Default Financial Account" (type: `other`, currency: USD)
+
+**Rationale:** Two approaches were considered for bridging the Track 1 / Track 2 dependency:
+
+1. Relax the `NOT NULL` constraint on `splits.financial_account_id` during Track 1.
+2. Seed placeholder records that satisfy the constraint.
+
+Option 1 was rejected because the NOT NULL constraint is a deliberate architectural decision (Decision 10) that ensures every dollar is always traceable to a real-world account. Relaxing it would leave Track 1 data structurally incomplete and create a messy retrofit problem when Track 2 arrives.
+
+Option 2 preserves schema integrity throughout. The database is never in a structurally invalid state. The placeholder records are clearly labeled, visible in the database, and not surfaced in the Track 1 UI. When Track 2 is implemented, users set up their real institutions and financial accounts and reassign splits from the defaults. The placeholder records are then deactivated.
+
+**Currency:** USD is the only currency supported during Track 1. The entity record silently references the pre-seeded USD commodity. A currency picker will be added when multi-currency support is implemented in a later phase.
+
+**Track 1 phase order (confirmed):**
+- Phase 5: Entity module
+- Phase 6: Commodities module
+- Phase 7: Chart of accounts
+- Phase 8: Transaction entry
+- Phase 9: Reports
+
+Institutions and financial accounts have no Track 1 phases. Their full CRUD management belongs to Track 2.
 
 ---
 

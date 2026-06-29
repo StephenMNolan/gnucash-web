@@ -67,24 +67,37 @@ def _load_schema() -> str:
 
 def _apply_schema(conn: sqlite3.Connection) -> None:
     """
-    Apply schema.sql to a new SQLite connection.
+    Apply schema.sql to a new SQLite connection and seed required data.
 
-    executescript() is used because the schema contains multiple statements
-    including triggers and views. It implicitly commits any open transaction
-    before running, which is correct here since we are initializing a fresh
-    database.
+    Seeding order matters due to foreign key dependencies:
 
-    After the schema runs, we seed the base currency (USD) and update the
-    five root accounts to reference it. The schema's INSERT OR IGNORE for
-    root accounts intentionally omits currency_id (it cannot be set until
-    the commodity record exists). We complete that here.
+      1. Schema DDL (tables, triggers, views, indexes)
+      2. USD commodity          — no dependencies
+      3. Root accounts          — depend on commodities (currency_id)
+      4. Default institution    — no dependencies
+      5. Default financial acct — depends on institutions and commodities
+
+    Steps 4 and 5 seed the minimum financial-layer data required to satisfy
+    the NOT NULL constraint on splits.financial_account_id during Track 1
+    (accounting view) development, before real institutions and financial
+    accounts are added in Track 2 (PFM view).
+
+    The default institution and financial account are clearly labeled so they
+    are recognizable as placeholders. They will be deactivated when the user
+    sets up their real financial accounts in Track 2.
+
+    executescript() is used for the DDL because the schema contains multiple
+    statements including triggers and views. It implicitly commits any open
+    transaction before running, which is correct for a fresh database.
     """
     schema_sql = _load_schema()
     conn.executescript(schema_sql)
 
-    # Seed USD as the base currency. This is the only commodity created
-    # automatically. All others are added by the user via the Commodities
-    # module in a later phase.
+    # ------------------------------------------------------------------
+    # Step 2: Seed USD as the base currency.
+    # The only commodity created automatically. All others are added by
+    # the user via the Commodities module in a later phase.
+    # ------------------------------------------------------------------
     conn.execute("""
         INSERT OR IGNORE INTO commodities (symbol, name, commodity_type)
         VALUES ('USD', 'US Dollar', 'currency')
@@ -94,15 +107,59 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
         "SELECT id FROM commodities WHERE symbol = 'USD' AND commodity_type = 'currency'"
     ).fetchone()[0]
 
-    # The five root accounts were inserted by the schema's INSERT OR IGNORE
-    # without currency_id (which is NOT NULL). Set it now.
+    # ------------------------------------------------------------------
+    # Step 3: Patch root accounts with currency_id.
+    # The schema's INSERT OR IGNORE for root accounts intentionally omits
+    # currency_id (it cannot be set until the commodity record exists).
+    # ------------------------------------------------------------------
     conn.execute(
         "UPDATE accounts SET currency_id = ? WHERE currency_id IS NULL",
         (usd_id,),
     )
 
+    # ------------------------------------------------------------------
+    # Step 4: Seed the default institution.
+    # A placeholder institution required by the financial_accounts FK.
+    # Visible in the database but not surfaced in the Track 1 UI.
+    # ------------------------------------------------------------------
+    conn.execute("""
+        INSERT OR IGNORE INTO institutions (name, notes)
+        VALUES (
+            'Default Financial Institution',
+            'Placeholder institution seeded during first-run setup. '
+            'All Track 1 splits reference the default financial account '
+            'under this institution. Replace with real institutions in Track 2.'
+        )
+    """)
+
+    institution_id = conn.execute(
+        "SELECT id FROM institutions WHERE name = 'Default Financial Institution'"
+    ).fetchone()[0]
+
+    # ------------------------------------------------------------------
+    # Step 5: Seed the default financial account.
+    # Referenced by splits.financial_account_id (NOT NULL) during Track 1.
+    # All Track 1 transactions point here until real financial accounts
+    # are set up in Track 2.
+    # ------------------------------------------------------------------
+    conn.execute("""
+        INSERT OR IGNORE INTO financial_accounts
+            (institution_id, name, account_type, currency_id, notes)
+        VALUES (
+            ?, 'Default Financial Account', 'other', ?,
+            'Placeholder financial account seeded during first-run setup. '
+            'All Track 1 splits reference this account. '
+            'Replace with real financial accounts in Track 2.'
+        )
+    """, (institution_id, usd_id))
+
     conn.commit()
-    logger.info("Schema applied and base currency seeded (USD id=%s).", usd_id)
+    logger.info(
+        "Schema applied. Seeded: USD (id=%s), default institution (id=%s), "
+        "default financial account.",
+        usd_id,
+        institution_id,
+    )
 
 
 # =============================================================================
@@ -220,9 +277,6 @@ async def open_database(token: dict, file_id: str):
         raise
     finally:
         conn.close()
-        # Only upload if we are exiting cleanly (no exception).
-        # We detect this by checking whether an exception is active.
-        # Because finally always runs, we use a flag set before yield.
 
     # Upload happens here, outside the try/finally, so it only runs
     # if the block completed without raising.
@@ -241,7 +295,8 @@ def create_database(token: dict, folder_id: str) -> str:
     Steps:
       1. Create an empty SQLite file in a temp location
       2. Apply the full schema (tables, triggers, views, indexes)
-      3. Seed the base currency (USD) and update root account currency_id
+      3. Seed required data: USD, root accounts, default institution,
+         default financial account
       4. Upload the initialized file to Drive in the given folder
       5. Return the Drive file ID of the new file
 
