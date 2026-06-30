@@ -11,9 +11,10 @@
 # Routers registered here:
 #   auth_router   — /auth/login, /auth/callback, /auth/me, /auth/logout
 #   setup_router  — /setup/status, /setup/token, /setup/init, /setup/link
+#   entity_router — /entity (GET, POST, PUT /entity/name)
 #
-# Future routers (Phases 5-8) will be added here as they are built:
-#   entities_router, commodities_router, accounts_router, transactions_router
+# Future routers (Phases 6-8) will be added here as they are built:
+#   commodities_router, accounts_router, transactions_router
 
 import logging
 import os
@@ -31,6 +32,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 from app.auth import init_oauth
 from app.auth import router as auth_router
 from app.db.setup import router as setup_router
+from app.entity.entity import router as entity_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,7 +47,7 @@ app = FastAPI(
         "Web-based double-entry accounting. "
         "User data lives on the user's own Google Drive."
     ),
-    version="0.4.0",
+    version="0.5.0",
 )
 
 app.add_middleware(
@@ -55,6 +57,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(setup_router)
+app.include_router(entity_router)
 
 
 @app.get("/")
