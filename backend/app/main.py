@@ -50,9 +50,16 @@ app = FastAPI(
     version="0.5.0",
 )
 
+# https_only must be True on Render so the session cookie is sent with the
+# Secure flag. Without it the browser drops the cookie on the HTTPS callback
+# from Google, the OAuth state is missing, and Authlib raises
+# MismatchingStateError. On localhost (HTTP) this would block all sessions,
+# so we read the flag from an env var that is True in production and absent
+# (defaulting to False) in local dev.
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ["SECRET_KEY"],
+    https_only=os.environ.get("HTTPS_ONLY", "false").lower() == "true",
 )
 
 app.include_router(auth_router)
