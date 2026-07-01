@@ -122,15 +122,15 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     # A placeholder institution required by the financial_accounts FK.
     # Visible in the database but not surfaced in the Track 1 UI.
     # ------------------------------------------------------------------
-    conn.execute("""
-        INSERT OR IGNORE INTO institutions (name, notes)
-        VALUES (
-            'Default Financial Institution',
-            'Placeholder institution seeded during first-run setup. '
-            'All Track 1 splits reference the default financial account '
-            'under this institution. Replace with real institutions in Track 2.'
-        )
-    """)
+    conn.execute(
+        "INSERT OR IGNORE INTO institutions (name, notes) VALUES (?, ?)",
+        (
+            "Default Financial Institution",
+            "Placeholder institution seeded during first-run setup. "
+            "All Track 1 splits reference the default financial account "
+            "under this institution. Replace with real institutions in Track 2.",
+        ),
+    )
 
     institution_id = conn.execute(
         "SELECT id FROM institutions WHERE name = 'Default Financial Institution'"
@@ -142,16 +142,20 @@ def _apply_schema(conn: sqlite3.Connection) -> None:
     # All Track 1 transactions point here until real financial accounts
     # are set up in Track 2.
     # ------------------------------------------------------------------
-    conn.execute("""
-        INSERT OR IGNORE INTO financial_accounts
-            (institution_id, name, account_type, currency_id, notes)
-        VALUES (
-            ?, 'Default Financial Account', 'other', ?,
-            'Placeholder financial account seeded during first-run setup. '
-            'All Track 1 splits reference this account. '
-            'Replace with real financial accounts in Track 2.'
-        )
-    """, (institution_id, usd_id))
+    conn.execute(
+        "INSERT OR IGNORE INTO financial_accounts "
+        "(institution_id, name, account_type, currency_id, notes) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            institution_id,
+            "Default Financial Account",
+            "other",
+            usd_id,
+            "Placeholder financial account seeded during first-run setup. "
+            "All Track 1 splits reference this account. "
+            "Replace with real financial accounts in Track 2.",
+        ),
+    )
 
     conn.commit()
     logger.info(
